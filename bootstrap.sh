@@ -101,11 +101,23 @@ clone_or_update_repo() {
   echo "Using branch: $REPO_BRANCH"
 
   if [ -d "$REPO_DIR/.git" ]; then
-    echo "Repository already exists at $REPO_DIR. Updating branch '$REPO_BRANCH'..."
+    echo "Repository already exists at $REPO_DIR."
     cd "$REPO_DIR"
-    git fetch origin "$REPO_BRANCH"
-    git checkout "$REPO_BRANCH"
-    git pull --ff-only origin "$REPO_BRANCH"
+
+    echo "Fetching branch '$REPO_BRANCH' from origin..."
+    if ! git fetch origin "$REPO_BRANCH"; then
+      echo "ERROR: Could not fetch branch '$REPO_BRANCH' from origin." >&2
+      exit 1
+    fi
+
+    echo "Resetting local working tree to origin/$REPO_BRANCH (discarding ALL local changes)..."
+    # Entfernt alle untracked + ignorierten Dateien/Verzeichnisse
+    git clean -xfd
+
+    # Setzt den Branch auf den Remote-Stand
+    git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
+    git reset --hard "origin/$REPO_BRANCH"
+
   else
     echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR..."
     mkdir -p "$REPO_DIR"
@@ -229,6 +241,8 @@ run_install() {
 
 main() {
   echo "Homelab bootstrap – this will prepare the system, install K3s and then deploy Gitea/manifests."
+  echo
+  echo "Repository branch: $REPO_BRANCH"
   echo
 
   need_root
