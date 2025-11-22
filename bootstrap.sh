@@ -60,8 +60,41 @@ ensure_basic_tools() {
   esac
 }
 
+install_helm_if_missing() {
+  echo "== Step 2: Checking Helm installation =="
+
+  if command -v helm >/dev/null 2>&1; then
+    echo "Helm is already installed."
+    return
+  fi
+
+  echo "Helm not found. Attempting to install Helm (helm 3+)..."
+
+  local os
+  os="$(detect_os)"
+
+  case "$os" in
+    debian|ubuntu)
+      echo "Installing Helm using official install script..."
+      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash -
+      ;;
+    *)
+      echo "Automatic Helm installation for OS '$os' is not implemented."
+      echo "Please install Helm manually: https://helm.sh/docs/intro/install/"
+      exit 1
+      ;;
+  esac
+
+  if command -v helm >/dev/null 2>&1; then
+    echo "Helm installation completed."
+  else
+    echo "Helm installation failed or helm not found after install." >&2
+    exit 1
+  fi
+}
+
 clone_or_update_repo() {
-  echo "== Step 2: Fetching homelab repository =="
+  echo "== Step 3: Fetching homelab repository =="
 
   if [ -d "$REPO_DIR/.git" ]; then
     echo "Repository already exists at $REPO_DIR. Updating..."
@@ -76,7 +109,7 @@ clone_or_update_repo() {
 }
 
 ensure_config() {
-  echo "== Step 3: Checking local configuration =="
+  echo "== Step 4: Checking local configuration =="
 
   if [ -f "$CONFIG_FILE" ]; then
     echo "Found local config: $CONFIG_FILE"
@@ -116,7 +149,7 @@ EOF
 }
 
 check_ports() {
-  echo "== Step 4: Checking important ports (80, 443) =="
+  echo "== Step 5: Checking important ports (80, 443) =="
 
   if ! command -v ss >/dev/null 2>&1; then
     echo "Command 'ss' not found, skipping port checks."
@@ -133,7 +166,7 @@ check_ports() {
 }
 
 install_k3s_if_missing() {
-  echo "== Step 5: Checking K3s installation =="
+  echo "== Step 6: Checking K3s installation =="
 
   if command -v k3s >/dev/null 2>&1; then
     echo "K3s is already installed."
@@ -162,7 +195,7 @@ install_k3s_if_missing() {
 }
 
 ensure_install_script() {
-  echo "== Step 6: Checking install.sh =="
+  echo "== Step 7: Checking install.sh =="
 
   local script="$REPO_DIR/install.sh"
 
@@ -181,7 +214,7 @@ ensure_install_script() {
 }
 
 run_install() {
-  echo "== Step 7: Running install.sh (deploying apps to K3s) =="
+  echo "== Step 8: Running install.sh (deploying apps to K3s) =="
   cd "$REPO_DIR"
   ./install.sh
 }
@@ -194,6 +227,7 @@ main() {
 
   need_root
   ensure_basic_tools
+  install_helm_if_missing
   clone_or_update_repo
   ensure_config
   check_ports
