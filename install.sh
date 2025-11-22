@@ -20,6 +20,11 @@ fi
 source "$CONFIG_FILE"
 
 # ------------------------------------------------------------
+# Force use of the correct K3s kubeconfig
+# ------------------------------------------------------------
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+# ------------------------------------------------------------
 # Validate config
 # ------------------------------------------------------------
 : "${GITEA_URL:?GITEA_URL must be set in $CONFIG_FILE}"
@@ -39,6 +44,7 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
+# Wait for API
 timeout=60
 while ! kubectl get nodes >/dev/null 2>&1; do
   echo "Waiting for Kubernetes API..."
@@ -101,7 +107,7 @@ echo "Helm releases:"
 helm list -n "$GITEA_NAMESPACE" || true
 
 # ------------------------------------------------------------
-# Apply any additional manifests
+# Apply additional manifests
 # ------------------------------------------------------------
 echo
 echo "== Step 6: Applying additional manifests (if present) =="
