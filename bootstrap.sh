@@ -196,55 +196,70 @@ check_existing_k3s() {
 
   echo "k3s binary is present."
 
-  # k3s-Status prüfen
+  # Wenn systemctl verfügbar ist, k3s-Status prüfen
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl is-active --quiet k3s; then
-      echo "k3s service is active."
-      echo "I will NOT touch the existing k3s installation."
-      echo "If you want a clean reinstall, run /usr/local/bin/k3s-uninstall.sh manually first."
+      echo "k3s service is active and healthy."
+      echo "I will NOT modify the existing installation."
       return
     else
-      echo "k3s service is installed but not active/healthy."
-      echo "This can cause errors like 'Kubernetes cluster unreachable'."
+      echo "k3s is installed but not active/healthy."
     fi
   else
-    echo "systemctl not available; cannot verify k3s status."
+    echo "systemctl not found; cannot verify k3s state reliably."
   fi
 
   echo
-  echo "WARNING: There is an existing k3s installation that does not appear to be running cleanly."
+  echo "WARNING: There is an existing k3s installation that is not running cleanly."
   echo "Resetting k3s will:"
   echo "  - Stop and uninstall k3s"
-  echo "  - Remove its data under /var/lib/rancher/k3s and /etc/rancher/k3s"
+  echo "  - Delete /var/lib/rancher/k3s and /etc/rancher/k3s"
   echo "  - Allow this script to install a fresh cluster"
   echo
 
-  # Prüfen ob wir interaktiv sind
+  #
+  # === FORCE OPTION ===
+  #
+  if [ "${K3S_FORCE_RESET:-0}" = "1" ]; then
+    echo "K3S_FORCE_RESET=1 is set."
+    echo "Proceeding with automatic k3s reset WITHOUT prompting."
+    if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+      /usr/local/bin/k3s-uninstall.sh
+      echo "k3s has been force-reset."
+      return
+    else
+      echo "ERROR: /usr/local/bin/k3s-uninstall.sh not found."
+      exit 1
+    fi
+  fi
+
+  #
+  # === INTERAKTIVER MODUS ===
+  #
   if [ -t 0 ] || [ -t 1 ]; then
-    # Input sicher über /dev/tty lesen, auch bei sudo
     read -r -p "Do you want to uninstall and reinstall k3s now? [y/N]: " answer </dev/tty || answer=""
   else
     echo "Non-interactive environment detected (e.g. curl | bash)."
-    echo "For safety, k3s will NOT be modified automatically."
-    echo "Run this script directly to answer the prompt, or uninstall manually:"
-    echo "  sudo /usr/local/bin/k3s-uninstall.sh"
+    echo "For safety, automatic reset is disabled."
+    echo "If you really want to reset k3s non-interactively, run again with:"
+    echo "  K3S_FORCE_RESET=1"
     exit 1
   fi
 
   case "$answer" in
     [yY][eE][sS]|[yY])
-      echo "User confirmed k3s reset. Running k3s-uninstall.sh ..."
+      echo "User confirmed reset. Running k3s-uninstall.sh ..."
       if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
         /usr/local/bin/k3s-uninstall.sh
-        echo "k3s has been uninstalled. A fresh installation will be attempted next."
+        echo "k3s has been uninstalled. A clean installation will follow."
       else
-        echo "ERROR: /usr/local/bin/k3s-uninstall.sh not found or not executable."
+        echo "ERROR: /usr/local/bin/k3s-uninstall.sh not found."
         exit 1
       fi
       ;;
     *)
-      echo "User chose NOT to modify the existing k3s installation."
-      echo "Aborting bootstrap to avoid unintentional changes."
+      echo "User chose NOT to reset k3s."
+      echo "Bootstrap aborted to protect this server."
       exit 1
       ;;
   esac

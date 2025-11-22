@@ -63,17 +63,30 @@ Stored at:
 
     /etc/homelab/config.env
 
-## 🔬 Branch-Specific Testing
+## Configuration & Environment Variables
 
-For testing, you can execute any branch of this repository directly.  
-This works by:
+The bootstrap process can be controlled via environment variables.  
+These variables are **optional** and are mostly intended for testing, CI, or advanced setups.
 
-1. Loading `bootstrap.sh` from the desired branch via `curl`
-2. Passing `REPO_BRANCH` to control which branch is cloned into `/opt/homelab`
+### Bootstrap-related variables
 
-Example: Test the `init` branch
+| Variable         | Default | Used by       | Description |
+|------------------|---------|---------------|-------------|
+| `REPO_BRANCH`    | `main`  | `bootstrap.sh`| Git branch to clone into `/opt/homelab`. Useful for testing feature branches. |
+| `K3S_FORCE_RESET`| `0`     | `bootstrap.sh`| If set to `1`, an unhealthy existing k3s installation will be **uninstalled without asking**. Use with care. |
+
+#### `REPO_BRANCH`
+
+Controls which Git branch is checked out to `/opt/homelab`.
+
+Examples:
 
 ```bash
+# Run bootstrap from main (default)
+curl -fsSL https://raw.githubusercontent.com/marshll/homelab/main/bootstrap.sh \
+  | sudo REPO_BRANCH=main bash
+
+# Run bootstrap from init branch for testing
 curl -fsSL https://raw.githubusercontent.com/marshll/homelab/init/bootstrap.sh \
   | sudo REPO_BRANCH=init bash
 ```
