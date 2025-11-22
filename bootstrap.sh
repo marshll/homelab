@@ -5,6 +5,9 @@ REPO_URL="https://github.com/marshll/homelab.git"
 REPO_DIR="/opt/homelab"
 CONFIG_FILE="/etc/homelab/config.env"
 
+# Standard-Branch (kann mit REPO_BRANCH=<branch> beim Aufruf überschrieben werden)
+REPO_BRANCH="${REPO_BRANCH:-main}"
+
 # ===== helper functions =====
 
 detect_os() {
@@ -95,15 +98,18 @@ install_helm_if_missing() {
 
 clone_or_update_repo() {
   echo "== Step 3: Fetching homelab repository =="
+  echo "Using branch: $REPO_BRANCH"
 
   if [ -d "$REPO_DIR/.git" ]; then
-    echo "Repository already exists at $REPO_DIR. Updating..."
+    echo "Repository already exists at $REPO_DIR. Updating branch '$REPO_BRANCH'..."
     cd "$REPO_DIR"
-    git pull --ff-only
+    git fetch origin "$REPO_BRANCH"
+    git checkout "$REPO_BRANCH"
+    git pull --ff-only origin "$REPO_BRANCH"
   else
-    echo "Cloning $REPO_URL to $REPO_DIR..."
+    echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR..."
     mkdir -p "$REPO_DIR"
-    git clone "$REPO_URL" "$REPO_DIR"
+    git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
     cd "$REPO_DIR"
   fi
 }
