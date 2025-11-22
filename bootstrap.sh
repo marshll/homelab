@@ -186,7 +186,6 @@ check_ports() {
   done
 }
 
-# Neue Funktion: Bestehende k3s-Installation prüfen und optional (mit Rückfrage) zurücksetzen
 check_existing_k3s() {
   echo "== Step 6: Checking existing K3s installation =="
 
@@ -197,7 +196,7 @@ check_existing_k3s() {
 
   echo "k3s binary is present."
 
-  # Wenn systemctl verfügbar ist, Status des Dienstes prüfen
+  # k3s-Status prüfen
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl is-active --quiet k3s; then
       echo "k3s service is active."
@@ -209,8 +208,7 @@ check_existing_k3s() {
       echo "This can cause errors like 'Kubernetes cluster unreachable'."
     fi
   else
-    echo "systemctl not found; cannot check k3s service status."
-    echo "k3s binary exists, but service health is unknown."
+    echo "systemctl not available; cannot verify k3s status."
   fi
 
   echo
@@ -218,10 +216,21 @@ check_existing_k3s() {
   echo "Resetting k3s will:"
   echo "  - Stop and uninstall k3s"
   echo "  - Remove its data under /var/lib/rancher/k3s and /etc/rancher/k3s"
-  echo "  - Allow this script to install a fresh k3s cluster"
+  echo "  - Allow this script to install a fresh cluster"
   echo
 
-  read -r -p "Do you want to uninstall and reinstall k3s now? [y/N]: " answer
+  # Prüfen ob wir interaktiv sind
+  if [ -t 0 ] || [ -t 1 ]; then
+    # Input sicher über /dev/tty lesen, auch bei sudo
+    read -r -p "Do you want to uninstall and reinstall k3s now? [y/N]: " answer </dev/tty || answer=""
+  else
+    echo "Non-interactive environment detected (e.g. curl | bash)."
+    echo "For safety, k3s will NOT be modified automatically."
+    echo "Run this script directly to answer the prompt, or uninstall manually:"
+    echo "  sudo /usr/local/bin/k3s-uninstall.sh"
+    exit 1
+  fi
+
   case "$answer" in
     [yY][eE][sS]|[yY])
       echo "User confirmed k3s reset. Running k3s-uninstall.sh ..."
@@ -230,13 +239,12 @@ check_existing_k3s() {
         echo "k3s has been uninstalled. A fresh installation will be attempted next."
       else
         echo "ERROR: /usr/local/bin/k3s-uninstall.sh not found or not executable."
-        echo "Cannot safely reset k3s automatically. Please fix this manually."
         exit 1
       fi
       ;;
     *)
       echo "User chose NOT to modify the existing k3s installation."
-      echo "Aborting bootstrap to avoid breaking this server."
+      echo "Aborting bootstrap to avoid unintentional changes."
       exit 1
       ;;
   esac
