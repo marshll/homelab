@@ -36,7 +36,7 @@ you to edit it before proceeding.
     ├── bootstrap.sh
     ├── install.sh
     ├── config.env.example
-    └── manifests/
+    └── charts/
 
 ## ⚙️ Requirements
 
@@ -62,6 +62,21 @@ sudo ./install.sh
 Stored at:
 
     /etc/homelab/config.env
+
+## 🔬 Branch-Specific Testing
+
+For testing, you can execute any branch of this repository directly.  
+This works by:
+
+1. Loading `bootstrap.sh` from the desired branch via `curl`
+2. Passing `REPO_BRANCH` to control which branch is cloned into `/opt/homelab`
+
+Example: Test the `init` branch
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marshll/homelab/init/bootstrap.sh \
+  | sudo REPO_BRANCH=init bash
+```
 
 ## 📝 License
 
