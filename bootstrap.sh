@@ -111,11 +111,17 @@ clone_or_update_repo() {
     fi
 
     echo "Resetting local working tree to origin/$REPO_BRANCH (discarding ALL local changes)..."
-    # Entfernt alle untracked + ignorierten Dateien/Verzeichnisse
+
+    # 1. Verwirft ALLE Änderungen in tracked Dateien
+    git reset --hard HEAD
+
+    # 2. Löscht untracked Dateien und Ordner
     git clean -xfd
 
-    # Setzt den Branch auf den Remote-Stand
+    # 3. Checke den Branch von origin komplett neu aus
     git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
+
+    # 4. Und setze erneut hart auf den Remote-Stand – absolute Sicherheit
     git reset --hard "origin/$REPO_BRANCH"
 
   else
