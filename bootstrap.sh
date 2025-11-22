@@ -153,8 +153,11 @@ GITEA_ADMIN_PASSWORD=changeme
 GITEA_ADMIN_EMAIL=you@example.com
 
 # Basic K3s configuration
+# IMPORTANT:
+# - Use the IP address of this host (output of `ip addr`)
+# - Or leave K3S_ADVERTISE_ADDRESS empty to let k3s auto-detect
 K3S_NODE_ROLE=server
-K3S_ADVERTISE_ADDRESS=192.168.1.10
+K3S_ADVERTISE_ADDRESS=
 
 # Optional: pin a specific K3s version, e.g. "v1.30.4+k3s1"
 # K3S_VERSION=v1.30.4+k3s1
@@ -183,11 +186,67 @@ check_ports() {
   done
 }
 
+# Neue Funktion: Bestehende k3s-Installation prüfen und optional (mit Rückfrage) zurücksetzen
+check_existing_k3s() {
+  echo "== Step 6: Checking existing K3s installation =="
+
+  if ! command -v k3s >/dev/null 2>&1; then
+    echo "No k3s binary found. Nothing to check."
+    return
+  fi
+
+  echo "k3s binary is present."
+
+  # Wenn systemctl verfügbar ist, Status des Dienstes prüfen
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet k3s; then
+      echo "k3s service is active."
+      echo "I will NOT touch the existing k3s installation."
+      echo "If you want a clean reinstall, run /usr/local/bin/k3s-uninstall.sh manually first."
+      return
+    else
+      echo "k3s service is installed but not active/healthy."
+      echo "This can cause errors like 'Kubernetes cluster unreachable'."
+    fi
+  else
+    echo "systemctl not found; cannot check k3s service status."
+    echo "k3s binary exists, but service health is unknown."
+  fi
+
+  echo
+  echo "WARNING: There is an existing k3s installation that does not appear to be running cleanly."
+  echo "Resetting k3s will:"
+  echo "  - Stop and uninstall k3s"
+  echo "  - Remove its data under /var/lib/rancher/k3s and /etc/rancher/k3s"
+  echo "  - Allow this script to install a fresh k3s cluster"
+  echo
+
+  read -r -p "Do you want to uninstall and reinstall k3s now? [y/N]: " answer
+  case "$answer" in
+    [yY][eE][sS]|[yY])
+      echo "User confirmed k3s reset. Running k3s-uninstall.sh ..."
+      if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+        /usr/local/bin/k3s-uninstall.sh
+        echo "k3s has been uninstalled. A fresh installation will be attempted next."
+      else
+        echo "ERROR: /usr/local/bin/k3s-uninstall.sh not found or not executable."
+        echo "Cannot safely reset k3s automatically. Please fix this manually."
+        exit 1
+      fi
+      ;;
+    *)
+      echo "User chose NOT to modify the existing k3s installation."
+      echo "Aborting bootstrap to avoid breaking this server."
+      exit 1
+      ;;
+  esac
+}
+
 install_k3s_if_missing() {
-  echo "== Step 6: Checking K3s installation =="
+  echo "== Step 7: Checking K3s installation =="
 
   if command -v k3s >/dev/null 2>&1; then
-    echo "K3s is already installed."
+    echo "K3s is already installed. Skipping k3s install."
     return
   fi
 
@@ -195,11 +254,16 @@ install_k3s_if_missing() {
 
   local extra_args=()
 
-  if [ "${K3S_ADVERTISE_ADDRESS:-}" != "" ]; then
-    extra_args+=(--node-ip "${K3S_ADVERTISE_ADDRESS}")
+  # Nur dann --node-ip setzen, wenn die Adresse wirklich auf einem Interface existiert
+  if [ -n "${K3S_ADVERTISE_ADDRESS:-}" ]; then
+    if ip addr | grep -q " ${K3S_ADVERTISE_ADDRESS}/"; then
+      echo "Using K3S_ADVERTISE_ADDRESS=${K3S_ADVERTISE_ADDRESS}"
+      extra_args+=(--node-ip "${K3S_ADVERTISE_ADDRESS}")
+    else
+      echo "WARNING: K3S_ADVERTISE_ADDRESS=${K3S_ADVERTISE_ADDRESS} not found on any interface. Ignoring this setting."
+    fi
   fi
 
-  # Optional: allow pinning a version via config.env
   if [ "${K3S_VERSION:-}" != "" ]; then
     echo "Using K3s version: $K3S_VERSION"
     INSTALL_K3S_VERSION="$K3S_VERSION" INSTALL_K3S_EXEC="${extra_args[*]}" \
@@ -213,7 +277,7 @@ install_k3s_if_missing() {
 }
 
 ensure_install_script() {
-  echo "== Step 7: Checking install.sh =="
+  echo "== Step 8: Checking install.sh =="
 
   local script="$REPO_DIR/install.sh"
 
@@ -232,7 +296,7 @@ ensure_install_script() {
 }
 
 run_install() {
-  echo "== Step 8: Running install.sh (deploying apps to K3s) =="
+  echo "== Step 9: Running install.sh (deploying apps to K3s) =="
   cd "$REPO_DIR"
   ./install.sh
 }
@@ -251,6 +315,7 @@ main() {
   clone_or_update_repo
   ensure_config
   check_ports
+  check_existing_k3s
   install_k3s_if_missing
   ensure_install_script
   run_install
