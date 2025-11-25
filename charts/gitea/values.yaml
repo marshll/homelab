@@ -1,0 +1,39 @@
+image:
+  repository: gitea/gitea
+  tag: 1.22.0
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: true
+  className: ""
+  host: gitea.homelab.example.com
+  tls:
+    enabled: false
+    secretName: ""
+
+gitea:
+  # aktuell nur als Platzhalter – kann später für einen Bootstrap-Job genutzt werden
+  admin:
+    username: ""
+    password: ""
+    email: ""
+
+  # App-Settings
+  secretKey: change-me
+  disableInstallPage: true
+
+persistence:
+  enabled: true
+  storageClassName: local-path
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
