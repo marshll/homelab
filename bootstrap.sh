@@ -251,7 +251,7 @@ ensure_config() {
 
   echo "No config found at $CONFIG_FILE"
   echo "Please copy the template:"
-  echo "  cp $REPO_DIR/example.config.env $CONFIG_FILE"
+  echo "  cp $REPO_DIR/config.env.example $CONFIG_FILE"
   echo "and edit it accordingly."
   exit 1
 }
