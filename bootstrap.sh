@@ -1,31 +1,95 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/marshll/homelab.git"
-REPO_DIR="/opt/homelab"
-CONFIG_FILE="/etc/homelab/config.env"
+# Default values (can be overridden by environment or CLI flags)
+REPO_URL_DEFAULT="https://github.com/marshll/homelab.git"
+REPO_DIR_DEFAULT="/opt/homelab"
+CONFIG_FILE_DEFAULT="/etc/homelab/config.env"
 
-# Standard-Branch (kann mit REPO_BRANCH=<branch> beim Aufruf überschrieben werden)
+# Allow overriding by environment variables first
+REPO_URL="${REPO_URL:-$REPO_URL_DEFAULT}"
+REPO_DIR="${REPO_DIR:-$REPO_DIR_DEFAULT}"
+CONFIG_FILE="${CONFIG_FILE:-$CONFIG_FILE_DEFAULT}"
+
+# Standard-Branch (kann mit REPO_BRANCH=<branch> oder CLI-Flag überschrieben werden)
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
 # Reset-Mode (leer, soft oder hard), über CLI-Argumente gesteuert
 RESET_MODE=""
 
-for arg in "$@"; do
-  case "$arg" in
+usage() {
+  cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --reset                 Soft reset: uninstall K3s and remove K3s data dirs
+  --hard-reset            Hard reset: like --reset + remove repo and config
+  --repo-branch BRANCH    Git branch to use (default: $REPO_BRANCH)
+  --repo-url URL          Git repository URL (default: $REPO_URL)
+  --repo-dir DIR          Local clone path (default: $REPO_DIR)
+  --config-file PATH      Config file path (default: $CONFIG_FILE)
+  -h, --help              Show this help and exit
+
+You can also override some values via environment variables, e.g.:
+  REPO_BRANCH=mybranch REPO_DIR=/srv/homelab $0
+EOF
+}
+
+# ===== strict argument parsing =====
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --reset)
       RESET_MODE="soft"
+      shift
       ;;
     --hard-reset)
       RESET_MODE="hard"
+      shift
+      ;;
+    --repo-branch)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --repo-branch requires a value."
+        usage
+        exit 1
+      fi
+      REPO_BRANCH="$2"
+      shift 2
+      ;;
+    --repo-url)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --repo-url requires a value."
+        usage
+        exit 1
+      fi
+      REPO_URL="$2"
+      shift 2
+      ;;
+    --repo-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --repo-dir requires a value."
+        usage
+        exit 1
+      fi
+      REPO_DIR="$2"
+      shift 2
+      ;;
+    --config-file)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --config-file requires a value."
+        usage
+        exit 1
+      fi
+      CONFIG_FILE="$2"
+      shift 2
       ;;
     --help|-h)
-      echo "Usage: $0 [--reset | --hard-reset]"
+      usage
       exit 0
       ;;
     *)
-      echo "ERROR: Unknown argument: $arg"
-      echo "Valid options: --reset, --hard-reset"
+      echo "ERROR: Unknown argument: $1"
+      usage
       exit 1
       ;;
   esac
@@ -147,6 +211,8 @@ install_helm_if_missing() {
 clone_or_update_repo() {
   echo "== Step 3: Fetching homelab repository =="
   echo "Using branch: $REPO_BRANCH"
+  echo "Repository URL: $REPO_URL"
+  echo "Repository dir: $REPO_DIR"
 
   if [ -d "$REPO_DIR/.git" ]; then
     echo "Repository already exists at $REPO_DIR."
@@ -358,6 +424,9 @@ main() {
   echo "Homelab bootstrap - this will prepare the system, install K3s and then deploy manifests."
   echo
   echo "Repository branch: $REPO_BRANCH"
+  echo "Repository URL:    $REPO_URL"
+  echo "Repository dir:    $REPO_DIR"
+  echo "Config file:       $CONFIG_FILE"
   echo
 
   need_root
