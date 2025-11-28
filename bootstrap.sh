@@ -163,6 +163,12 @@ ensure_basic_tools() {
   local os
   os="$(detect_os)"
 
+  if ! command -v envsubst >/dev/null 2>&1; then
+    echo "ERROR: 'envsubst' not found (package 'gettext-base' unter Debian/Ubuntu)."
+    echo "Bitte installieren mit: sudo apt-get install -y gettext-base"
+    exit 1
+  fi
+
   case "$os" in
     debian|ubuntu)
       echo "Installing missing tools via apt: ${missing[*]}"
@@ -226,7 +232,7 @@ clone_or_update_repo() {
 
   # Wenn das Verzeichnis bereits existiert: komplett löschen
   if [ -d "$REPO_DIR" ]; then
-    echo "Existing directory $REPO_DIR found – removing for clean clone ..."
+    echo "Existing directory $REPO_DIR found - removing for clean clone ..."
     rm -rf "$REPO_DIR"
   fi
 
@@ -405,6 +411,21 @@ ensure_install_script() {
   echo "install.sh is ready."
 }
 
+install_internal_ca() {
+  local CA_SRC="/root/internal_ca_chain.crt"   # <- hier legst du deine CA-Chain hin
+  local CA_DST="/usr/local/share/ca-certificates/internal-ca.crt"
+
+  if [ ! -f "$CA_SRC" ]; then
+    echo "WARN: internal CA $CA_SRC nicht gefunden, überspringe CA-Install."
+    return 0
+  fi
+
+  echo "== Installing internal CA =="
+  sudo mkdir -p /usr/local/share/ca-certificates
+  sudo cp "$CA_SRC" "$CA_DST"
+  sudo update-ca-certificates
+}
+
 run_install() {
   echo "== Step 9: Running install.sh (deploying apps to K3s) =="
   cd "$REPO_DIR"
@@ -438,6 +459,7 @@ main() {
   check_existing_k3s
   install_k3s_if_missing
   ensure_install_script
+  install_internal_ca
   run_install
 
   echo

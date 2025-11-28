@@ -43,6 +43,9 @@ if [ "${CHARTS+x}" != "x" ]; then
   exit 1
 fi
 
+# Fallback-Defaults für Step-Issuer Namespace
+: "${STEP_ISSUER_NAMESPACE:=step-issuer}"
+
 # ------------------------------------------------------------
 # Ensure k3s / kubectl ready
 # ------------------------------------------------------------
@@ -68,7 +71,7 @@ done
 echo "K3s API reachable."
 
 # ------------------------------------------------------------
-# Ensure Helm installed
+# Ensure Helm installed + repos
 # ------------------------------------------------------------
 echo "== Step 2: Checking Helm =="
 if ! command -v helm >/dev/null 2>&1; then
@@ -80,6 +83,80 @@ fi
 helm version >/dev/null 2>&1 || {
   echo "ERROR: helm version check failed."
   exit 1
+}
+
+# Helm-Repos für Remote-Charts (z. B. smallstep/step-issuer) sicherstellen
+# (lokale Charts bleiben davon unberührt)
+if ! helm repo list 2>/dev/null | grep -q '^smallstep'; then
+  echo "Adding smallstep Helm repo (for step-issuer)..."
+  helm repo add smallstep https://smallstep.github.io/helm-charts
+fi
+
+# Optional: jetstack, falls du irgendwann cert-manager als Remote-Chart nutzt
+if ! helm repo list 2>/dev/null | grep -q '^jetstack'; then
+  echo "Adding jetstack Helm repo (for cert-manager, if needed)..."
+  helm repo add jetstack https://charts.jetstack.io
+fi
+
+helm repo update
+
+# ------------------------------------------------------------
+# Helper: configure step-issuer (Secret + StepClusterIssuer)
+# ------------------------------------------------------------
+configure_step_issuer() {
+  echo
+  echo "== Step 4: Configuring step-issuer & StepClusterIssuer =="
+
+  # Wenn Step-CA nicht konfiguriert ist, alles überspringen
+  if [ -z "${STEP_CA_URL:-}" ] || [ -z "${STEP_CA_PROVISIONER:-}" ]; then
+    echo "STEP_CA_URL oder STEP_CA_PROVISIONER nicht gesetzt – skipping step-issuer configuration."
+    return 0
+  fi
+
+  # Key- und Passwort-Dateien prüfen (wie in config.env konfiguriert)
+  if [ -z "${STEP_CA_PROVISIONER_KEY_FILE:-}" ] || [ ! -f "${STEP_CA_PROVISIONER_KEY_FILE}" ]; then
+    echo "WARN: STEP_CA_PROVISIONER_KEY_FILE '${STEP_CA_PROVISIONER_KEY_FILE:-<unset>}' nicht gefunden."
+    echo "      step-issuer Secret wird nicht erstellt."
+    return 0
+  fi
+
+  if [ -z "${STEP_CA_PROVISIONER_PASSWORD_FILE:-}" ] || [ ! -f "${STEP_CA_PROVISIONER_PASSWORD_FILE}" ]; then
+    echo "WARN: STEP_CA_PROVISIONER_PASSWORD_FILE '${STEP_CA_PROVISIONER_PASSWORD_FILE:-<unset>}' nicht gefunden."
+    echo "      step-issuer Secret wird nicht erstellt."
+    return 0
+  fi
+
+  echo "Ensuring namespace '${STEP_ISSUER_NAMESPACE}' exists for step-issuer..."
+  kubectl create namespace "${STEP_ISSUER_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+  echo "Creating/updating secret 'step-issuer-credentials' in namespace ${STEP_ISSUER_NAMESPACE} ..."
+  kubectl -n "${STEP_ISSUER_NAMESPACE}" delete secret step-issuer-credentials >/dev/null 2>&1 || true
+
+  kubectl -n "${STEP_ISSUER_NAMESPACE}" create secret generic step-issuer-credentials \
+    --from-literal=CA_URL="${STEP_CA_URL}" \
+    --from-literal=PROVISIONER_NAME="${STEP_CA_PROVISIONER}" \
+    --from-file=PROVISIONER_KEY="${STEP_CA_PROVISIONER_KEY_FILE}" \
+    --from-file=PROVISIONER_PASSWORD="${STEP_CA_PROVISIONER_PASSWORD_FILE}"
+
+  # *** HIER: Template mit envsubst anwenden ***
+  local tpl_dir="$MANIFEST_DIR/step-issuer"
+  local tpl_file="$tpl_dir/step-clusterissuer.yaml.tpl"
+
+  echo "Looking for StepClusterIssuer template at: $tpl_file"
+
+  if [ ! -f "$tpl_file" ]; then
+    echo "WARN: StepClusterIssuer template '$tpl_file' not found – skipping issuer apply."
+    echo "      Bitte lege die Datei an oder passe MANIFEST_DIR an."
+    return 0
+  fi
+
+  echo "Applying StepClusterIssuer 'step-ca-issuer' from template ..."
+
+  # envsubst ersetzt ${STEP_CA_URL} und ${STEP_CA_PROVISIONER} im Template
+  STEP_CA_URL="${STEP_CA_URL}" STEP_CA_PROVISIONER="${STEP_CA_PROVISIONER}" \
+    envsubst < "$tpl_file" | kubectl apply -f -
+
+  echo "step-issuer configuration finished."
 }
 
 # ------------------------------------------------------------
@@ -99,7 +176,7 @@ for desc in "${CHARTS[@]}"; do
   # chart_ref kann entweder:
   # - lokaler Pfad (relativ zum Repo)
   # - absoluter Pfad
-  # - Remote-Chart (z. B. jetstack/cert-manager)
+  # - Remote-Chart (z. B. jetstack/cert-manager oder smallstep/step-issuer)
   chart_ref="$chart_ref_raw"
   local_path=""
 
@@ -146,10 +223,15 @@ for desc in "${CHARTS[@]}"; do
 done
 
 # ------------------------------------------------------------
+# Step 4: configure step-issuer (Secret + StepClusterIssuer)
+# ------------------------------------------------------------
+configure_step_issuer
+
+# ------------------------------------------------------------
 # Apply additional manifests
 # ------------------------------------------------------------
 echo
-echo "== Step 4: Applying additional manifests (if present) =="
+echo "== Step 5: Applying additional manifests (if present) =="
 
 if [ -d "$MANIFEST_DIR" ]; then
   find "$MANIFEST_DIR" -type f -name "*.yaml" -print0 | while IFS= read -r -d '' file; do
@@ -172,3 +254,6 @@ echo
 echo "Ingress (if configured) should expose e.g.:"
 echo "  https://${GITEA_URL}"
 echo
+echo "If you use step-ca + step-issuer, you now have a ClusterIssuer 'step-ca-issuer'."
+echo "You can reference it in Ingress/Credentials via:"
+echo "  cert-manager.io/cluster-issuer: step-ca-issuer"
