@@ -214,29 +214,29 @@ clone_or_update_repo() {
   echo "Using branch: $REPO_BRANCH"
   echo "Repository URL: $REPO_URL"
   echo "Repository dir: $REPO_DIR"
+  echo
 
-  if [ -d "$REPO_DIR/.git" ]; then
-    echo "Repository already exists at $REPO_DIR."
-    cd "$REPO_DIR"
-
-    echo "Fetching branch '$REPO_BRANCH' from origin..."
-    if ! git fetch origin "$REPO_BRANCH"; then
-      echo "ERROR: Could not fetch branch '$REPO_BRANCH' from origin." >&2
-      exit 1
-    fi
-
-    echo "Resetting local working tree to origin/$REPO_BRANCH (discarding ALL local changes)..."
-
-    git reset --hard HEAD
-    git clean -xfd
-    git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
-    git reset --hard "origin/$REPO_BRANCH"
-  else
-    echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR..."
-    mkdir -p "$REPO_DIR"
-    git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
-    cd "$REPO_DIR"
+  # Optional: vorab prüfen, ob der Branch auf dem Remote existiert
+  echo "Checking if remote branch '$REPO_BRANCH' exists on $REPO_URL ..."
+  if ! git ls-remote --exit-code --heads "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
+    echo "ERROR: Remote branch '$REPO_BRANCH' does not exist on $REPO_URL"
+    echo "       Please create/push it or use a different --repo-branch."
+    exit 1
   fi
+
+  # Wenn das Verzeichnis bereits existiert: komplett löschen
+  if [ -d "$REPO_DIR" ]; then
+    echo "Existing directory $REPO_DIR found – removing for clean clone ..."
+    rm -rf "$REPO_DIR"
+  fi
+
+  # Neu klonen
+  echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR ..."
+  mkdir -p "$REPO_DIR"
+  git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
+
+  cd "$REPO_DIR"
+  echo "Repository cloned successfully."
 }
 
 ensure_config() {
