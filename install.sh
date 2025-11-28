@@ -4,7 +4,7 @@ set -euo pipefail
 CONFIG_FILE="/etc/homelab/config.env"
 
 echo "== Homelab install script =="
-echo "Deploying local Helm chart (Gitea) into your K3s cluster."
+echo "Deploying local Helm charts into your K3s cluster."
 echo
 
 # ------------------------------------------------------------
@@ -25,14 +25,23 @@ source "$CONFIG_FILE"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # ------------------------------------------------------------
-# Validate config
+# Validate minimal config
 # ------------------------------------------------------------
 : "${GITEA_URL:?GITEA_URL must be set in $CONFIG_FILE}"
 : "${GITEA_NAMESPACE:=gitea}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHART_DIR="$SCRIPT_DIR/charts/gitea"
-MANIFEST_DIR="$SCRIPT_DIR/manifests"
+
+# MANIFEST_DIR kann in der Config relativ gesetzt werden (z. B. "manifests")
+MANIFEST_DIR="${MANIFEST_DIR:-manifests}"
+MANIFEST_DIR="$SCRIPT_DIR/$MANIFEST_DIR"
+
+# CHARTS muss in der Config definiert sein
+if [ "${CHARTS+x}" != "x" ]; then
+  echo "ERROR: CHARTS array is not defined in $CONFIG_FILE"
+  echo "Please define CHARTS=() with your Helm releases in the config."
+  exit 1
+fi
 
 # ------------------------------------------------------------
 # Ensure k3s / kubectl ready
@@ -74,43 +83,73 @@ helm version >/dev/null 2>&1 || {
 }
 
 # ------------------------------------------------------------
-# Verify local chart
+# Charts to install (from config)
 # ------------------------------------------------------------
-echo "== Step 3: Verifying local Gitea chart at $CHART_DIR =="
+echo "== Step 3: Verifying and installing charts from configuration =="
 
-if [ ! -f "$CHART_DIR/Chart.yaml" ]; then
-  echo "ERROR: Local chart not found at $CHART_DIR"
-  echo "Expected: charts/gitea/Chart.yaml"
-  exit 1
-fi
+for desc in "${CHARTS[@]}"; do
+  # Split descriptor into 4 parts at most
+  IFS=':' read -r release chart_ref_raw namespace extra <<< "$desc"
 
-# ------------------------------------------------------------
-# Create namespace
-# ------------------------------------------------------------
-echo "== Step 4: Ensuring namespace '$GITEA_NAMESPACE' exists =="
+  echo
+  echo "-- Chart: $release"
+  echo "   Raw reference: $chart_ref_raw"
+  echo "   Namespace:     $namespace"
 
-kubectl create namespace "$GITEA_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+  # chart_ref kann entweder:
+  # - lokaler Pfad (relativ zum Repo)
+  # - absoluter Pfad
+  # - Remote-Chart (z. B. jetstack/cert-manager)
+  chart_ref="$chart_ref_raw"
+  local_path=""
 
-# ------------------------------------------------------------
-# Install / upgrade Gitea
-# ------------------------------------------------------------
-echo "== Step 5: Installing or upgrading Gitea from local chart =="
+  # Wenn kein Slash vorne ist und das Verzeichnis unter SCRIPT_DIR existiert,
+  # behandeln wir es als lokalen Chart-Pfad relativ zum Repo.
+  if [[ "$chart_ref_raw" != /* ]] && [ -d "$SCRIPT_DIR/$chart_ref_raw" ]; then
+    local_path="$SCRIPT_DIR/$chart_ref_raw"
+    chart_ref="$local_path"
+  elif [ -d "$chart_ref_raw" ]; then
+    # Absoluter (oder bereits aufgelöster) Pfad
+    local_path="$chart_ref_raw"
+  fi
 
-helm upgrade --install gitea "$CHART_DIR" \
-  --namespace "$GITEA_NAMESPACE" \
-  --create-namespace \
-  --set-string ingress.host="$GITEA_URL"
+  if [ -n "$local_path" ]; then
+    echo "   Detected local chart directory: $local_path"
+    if [ ! -f "$local_path/Chart.yaml" ]; then
+      echo "ERROR: Local chart for release '$release' not found at $local_path"
+      echo "Expected: $local_path/Chart.yaml"
+      exit 1
+    fi
+    echo "   Local chart verified."
+  else
+    echo "   Using chart reference as-is (assuming Helm repo is configured)."
+  fi
 
-echo
-echo "Gitea deployment applied."
-echo "Helm releases:"
-helm list -n "$GITEA_NAMESPACE" || true
+  # Ensure namespace exists
+  echo "   Ensuring namespace '$namespace' exists..."
+  kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
+
+  # Install or upgrade
+  echo "   Installing/upgrading release '$release'..."
+  if [ -n "${extra:-}" ]; then
+    # `extra` kann mehrere Optionen enthalten; unquoted expanden, damit sie als einzelne Args ankommen
+    helm upgrade --install "$release" "$chart_ref" \
+      --namespace "$namespace" --create-namespace $extra
+  else
+    helm upgrade --install "$release" "$chart_ref" \
+      --namespace "$namespace" --create-namespace
+  fi
+
+  echo "   Release '$release' applied."
+  echo "   Helm releases in namespace '$namespace':"
+  helm list -n "$namespace" || true
+done
 
 # ------------------------------------------------------------
 # Apply additional manifests
 # ------------------------------------------------------------
 echo
-echo "== Step 6: Applying additional manifests (if present) =="
+echo "== Step 4: Applying additional manifests (if present) =="
 
 if [ -d "$MANIFEST_DIR" ]; then
   find "$MANIFEST_DIR" -type f -name "*.yaml" -print0 | while IFS= read -r -d '' file; do
@@ -118,7 +157,7 @@ if [ -d "$MANIFEST_DIR" ]; then
     kubectl apply -f "$file"
   done
 else
-  echo "No manifests directory found."
+  echo "No manifests directory found at $MANIFEST_DIR."
 fi
 
 # ------------------------------------------------------------
@@ -126,9 +165,10 @@ fi
 # ------------------------------------------------------------
 echo
 echo "== Homelab installation complete =="
-echo "Check Gitea pods with:"
-echo "  kubectl get pods -n $GITEA_NAMESPACE"
+
+echo "Check Gitea pods with (if Gitea is part of CHARTS):"
+echo "  kubectl get pods -n ${GITEA_NAMESPACE}"
 echo
-echo "Ingress should expose:"
-echo "  https://$GITEA_URL"
+echo "Ingress (if configured) should expose e.g.:"
+echo "  https://${GITEA_URL}"
 echo

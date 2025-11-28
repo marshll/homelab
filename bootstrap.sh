@@ -142,36 +142,10 @@ ensure_config() {
     return
   fi
 
-  echo "No local config found. Creating a template at $CONFIG_FILE ..."
-  mkdir -p "$(dirname "$CONFIG_FILE")"
-
-  cat > "$CONFIG_FILE" <<'EOF'
-# Homelab base configuration
-# Adjust these values before re-running bootstrap.sh
-
-# Public domain or local DNS name for your homelab
-HOMELAB_DOMAIN=homelab.example.com
-GITEA_URL=gitea.homelab.example.com
-
-# Initial Gitea admin account
-GITEA_ADMIN_USER=admin
-GITEA_ADMIN_PASSWORD=changeme
-GITEA_ADMIN_EMAIL=you@example.com
-
-# Basic K3s configuration
-# IMPORTANT:
-# - Use the IP address of this host (output of `ip addr`)
-# - Or leave K3S_ADVERTISE_ADDRESS empty to let k3s auto-detect
-K3S_NODE_ROLE=server
-K3S_ADVERTISE_ADDRESS=
-
-# Optional: pin a specific K3s version, e.g. "v1.30.4+k3s1"
-# K3S_VERSION=v1.30.4+k3s1
-EOF
-
-  echo
-  echo "A template config has been created."
-  echo "Please edit $CONFIG_FILE to match your environment and run this script again."
+  echo "No config found at $CONFIG_FILE"
+  echo "Please copy the template:"
+  echo "  cp $REPO_DIR/example.config.env $CONFIG_FILE"
+  echo "and edit it accordingly."
   exit 1
 }
 
