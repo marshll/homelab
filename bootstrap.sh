@@ -414,9 +414,34 @@ run_install() {
 # ===== main =====
 
 main() {
-  need_root
 
+  need_root
+  ensure_basic_tools
+  clone_or_update_repo
+  
   # Reset bekommt absolute Priorität: nur resetten, NICHT installieren
   if [ -n "$RESET_MODE" ]; then
     perform_reset
   fi
+
+  echo "Homelab bootstrap - this will prepare the system, install K3s and then deploy manifests."
+  echo
+  echo "Repository branch: $REPO_BRANCH"
+  echo "Repository URL:    $REPO_URL"
+  echo "Repository dir:    $REPO_DIR"
+  echo "Config file:       $CONFIG_FILE"
+  echo
+
+  install_helm_if_missing
+  ensure_config
+  check_ports
+  check_existing_k3s
+  install_k3s_if_missing
+  ensure_install_script
+  run_install
+
+  echo
+  echo "Bootstrap process completed."
+}
+
+main "$@"
