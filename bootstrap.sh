@@ -8,6 +8,29 @@ CONFIG_FILE="/etc/homelab/config.env"
 # Standard-Branch (kann mit REPO_BRANCH=<branch> beim Aufruf überschrieben werden)
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
+# Reset-Mode (leer, soft oder hard), über CLI-Argumente gesteuert
+RESET_MODE=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --reset)
+      RESET_MODE="soft"
+      ;;
+    --hard-reset)
+      RESET_MODE="hard"
+      ;;
+    --help|-h)
+      echo "Usage: $0 [--reset | --hard-reset]"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $arg"
+      echo "Valid options: --reset, --hard-reset"
+      exit 1
+      ;;
+  esac
+done
+
 # ===== helper functions =====
 
 detect_os() {
@@ -29,6 +52,31 @@ need_root() {
 pkg_install_debian() {
   apt-get update -y
   apt-get install -y "$@"
+}
+
+perform_reset() {
+  echo "Homelab bootstrap - RESET mode ($RESET_MODE)"
+  echo
+
+  echo "Stopping and uninstalling K3s (if present)..."
+  if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+    /usr/local/bin/k3s-uninstall.sh || true
+  else
+    echo "k3s-uninstall.sh not found, skipping script-based uninstall."
+  fi
+
+  echo "Removing K3s data directories..."
+  rm -rf /var/lib/rancher/k3s /etc/rancher/k3s || true
+
+  if [ "$RESET_MODE" = "hard" ]; then
+    echo "HARD reset: removing homelab repo and config."
+    rm -rf "$REPO_DIR" || true
+    rm -f "$CONFIG_FILE" || true
+  fi
+
+  echo
+  echo "Reset ($RESET_MODE) completed."
+  exit 0
 }
 
 ensure_basic_tools() {
@@ -307,12 +355,18 @@ run_install() {
 # ===== main =====
 
 main() {
-  echo "Homelab bootstrap – this will prepare the system, install K3s and then deploy Gitea/manifests."
+  echo "Homelab bootstrap - this will prepare the system, install K3s and then deploy manifests."
   echo
   echo "Repository branch: $REPO_BRANCH"
   echo
 
   need_root
+  
+  # Falls Reset-Mode gesetzt ist, nur resetten und dann beenden
+  if [ -n "$RESET_MODE" ]; then
+    perform_reset
+  fi
+
   ensure_basic_tools
   install_helm_if_missing
   clone_or_update_repo
