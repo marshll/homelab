@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Default values (can be overridden by environment or CLI flags)
+# ===== defaults (can be overridden by env OR CLI) =====
+
 REPO_URL_DEFAULT="https://github.com/marshll/homelab.git"
 REPO_DIR_DEFAULT="/opt/homelab"
 CONFIG_FILE_DEFAULT="/etc/homelab/config.env"
 
-# Allow overriding by environment variables first
+# allow environment overrides first
 REPO_URL="${REPO_URL:-$REPO_URL_DEFAULT}"
 REPO_DIR="${REPO_DIR:-$REPO_DIR_DEFAULT}"
 CONFIG_FILE="${CONFIG_FILE:-$CONFIG_FILE_DEFAULT}"
 
-# Standard-Branch (kann mit REPO_BRANCH=<branch> oder CLI-Flag überschrieben werden)
+# branch: env or default
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
-# Reset-Mode (leer, soft oder hard), über CLI-Argumente gesteuert
+# reset mode: "", "soft", "hard"
 RESET_MODE=""
 
 usage() {
@@ -226,18 +227,10 @@ clone_or_update_repo() {
 
     echo "Resetting local working tree to origin/$REPO_BRANCH (discarding ALL local changes)..."
 
-    # 1. Verwirft ALLE Änderungen in tracked Dateien
     git reset --hard HEAD
-
-    # 2. Löscht untracked Dateien und Ordner
     git clean -xfd
-
-    # 3. Checke den Branch von origin komplett neu aus
     git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
-
-    # 4. Und setze erneut hart auf den Remote-Stand – absolute Sicherheit
     git reset --hard "origin/$REPO_BRANCH"
-
   else
     echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR..."
     mkdir -p "$REPO_DIR"
@@ -421,33 +414,9 @@ run_install() {
 # ===== main =====
 
 main() {
-  echo "Homelab bootstrap - this will prepare the system, install K3s and then deploy manifests."
-  echo
-  echo "Repository branch: $REPO_BRANCH"
-  echo "Repository URL:    $REPO_URL"
-  echo "Repository dir:    $REPO_DIR"
-  echo "Config file:       $CONFIG_FILE"
-  echo
-
   need_root
-  
-  # Falls Reset-Mode gesetzt ist, nur resetten und dann beenden
+
+  # Reset bekommt absolute Priorität: nur resetten, NICHT installieren
   if [ -n "$RESET_MODE" ]; then
     perform_reset
   fi
-
-  ensure_basic_tools
-  install_helm_if_missing
-  clone_or_update_repo
-  ensure_config
-  check_ports
-  check_existing_k3s
-  install_k3s_if_missing
-  ensure_install_script
-  run_install
-
-  echo
-  echo "Bootstrap process completed."
-}
-
-main "$@"
