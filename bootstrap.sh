@@ -1,12 +1,100 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/marshll/homelab.git"
-REPO_DIR="/opt/homelab"
-CONFIG_FILE="/etc/homelab/config.env"
+# ===== defaults (can be overridden by env OR CLI) =====
 
-# Standard-Branch (kann mit REPO_BRANCH=<branch> beim Aufruf überschrieben werden)
+REPO_URL_DEFAULT="https://github.com/marshll/homelab.git"
+REPO_DIR_DEFAULT="/opt/homelab"
+CONFIG_FILE_DEFAULT="/etc/homelab/config.env"
+
+# allow environment overrides first
+REPO_URL="${REPO_URL:-$REPO_URL_DEFAULT}"
+REPO_DIR="${REPO_DIR:-$REPO_DIR_DEFAULT}"
+CONFIG_FILE="${CONFIG_FILE:-$CONFIG_FILE_DEFAULT}"
+
+# branch: env or default
 REPO_BRANCH="${REPO_BRANCH:-main}"
+
+# reset mode: "", "soft", "hard"
+RESET_MODE=""
+
+usage() {
+  cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --reset                 Soft reset: uninstall K3s and remove K3s data dirs
+  --hard-reset            Hard reset: like --reset + remove repo and config
+  --repo-branch BRANCH    Git branch to use (default: $REPO_BRANCH)
+  --repo-url URL          Git repository URL (default: $REPO_URL)
+  --repo-dir DIR          Local clone path (default: $REPO_DIR)
+  --config-file PATH      Config file path (default: $CONFIG_FILE)
+  -h, --help              Show this help and exit
+
+You can also override some values via environment variables, e.g.:
+  REPO_BRANCH=mybranch REPO_DIR=/srv/homelab $0
+EOF
+}
+
+# ===== strict argument parsing =====
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reset)
+      RESET_MODE="soft"
+      shift
+      ;;
+    --hard-reset)
+      RESET_MODE="hard"
+      shift
+      ;;
+    --repo-branch)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --repo-branch requires a value."
+        usage
+        exit 1
+      fi
+      REPO_BRANCH="$2"
+      shift 2
+      ;;
+    --repo-url)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --repo-url requires a value."
+        usage
+        exit 1
+      fi
+      REPO_URL="$2"
+      shift 2
+      ;;
+    --repo-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --repo-dir requires a value."
+        usage
+        exit 1
+      fi
+      REPO_DIR="$2"
+      shift 2
+      ;;
+    --config-file)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --config-file requires a value."
+        usage
+        exit 1
+      fi
+      CONFIG_FILE="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $1"
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 # ===== helper functions =====
 
@@ -31,6 +119,31 @@ pkg_install_debian() {
   apt-get install -y "$@"
 }
 
+perform_reset() {
+  echo "Homelab bootstrap - RESET mode ($RESET_MODE)"
+  echo
+
+  echo "Stopping and uninstalling K3s (if present)..."
+  if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+    /usr/local/bin/k3s-uninstall.sh || true
+  else
+    echo "k3s-uninstall.sh not found, skipping script-based uninstall."
+  fi
+
+  echo "Removing K3s data directories..."
+  rm -rf /var/lib/rancher/k3s /etc/rancher/k3s || true
+
+  if [ "$RESET_MODE" = "hard" ]; then
+    echo "HARD reset: removing homelab repo and config."
+    rm -rf "$REPO_DIR" || true
+    rm -f "$CONFIG_FILE" || true
+  fi
+
+  echo
+  echo "Reset ($RESET_MODE) completed."
+  exit 0
+}
+
 ensure_basic_tools() {
   echo "== Step 1: Checking required tools (git, curl) =="
 
@@ -49,6 +162,12 @@ ensure_basic_tools() {
   echo "Missing required tools: ${missing[*]}"
   local os
   os="$(detect_os)"
+
+  if ! command -v envsubst >/dev/null 2>&1; then
+    echo "ERROR: 'envsubst' not found (package 'gettext-base' unter Debian/Ubuntu)."
+    echo "Bitte installieren mit: sudo apt-get install -y gettext-base"
+    exit 1
+  fi
 
   case "$os" in
     debian|ubuntu)
@@ -99,37 +218,31 @@ install_helm_if_missing() {
 clone_or_update_repo() {
   echo "== Step 3: Fetching homelab repository =="
   echo "Using branch: $REPO_BRANCH"
+  echo "Repository URL: $REPO_URL"
+  echo "Repository dir: $REPO_DIR"
+  echo
 
-  if [ -d "$REPO_DIR/.git" ]; then
-    echo "Repository already exists at $REPO_DIR."
-    cd "$REPO_DIR"
-
-    echo "Fetching branch '$REPO_BRANCH' from origin..."
-    if ! git fetch origin "$REPO_BRANCH"; then
-      echo "ERROR: Could not fetch branch '$REPO_BRANCH' from origin." >&2
-      exit 1
-    fi
-
-    echo "Resetting local working tree to origin/$REPO_BRANCH (discarding ALL local changes)..."
-
-    # 1. Verwirft ALLE Änderungen in tracked Dateien
-    git reset --hard HEAD
-
-    # 2. Löscht untracked Dateien und Ordner
-    git clean -xfd
-
-    # 3. Checke den Branch von origin komplett neu aus
-    git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
-
-    # 4. Und setze erneut hart auf den Remote-Stand – absolute Sicherheit
-    git reset --hard "origin/$REPO_BRANCH"
-
-  else
-    echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR..."
-    mkdir -p "$REPO_DIR"
-    git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
-    cd "$REPO_DIR"
+  # Optional: vorab prüfen, ob der Branch auf dem Remote existiert
+  echo "Checking if remote branch '$REPO_BRANCH' exists on $REPO_URL ..."
+  if ! git ls-remote --exit-code --heads "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
+    echo "ERROR: Remote branch '$REPO_BRANCH' does not exist on $REPO_URL"
+    echo "       Please create/push it or use a different --repo-branch."
+    exit 1
   fi
+
+  # Wenn das Verzeichnis bereits existiert: komplett löschen
+  if [ -d "$REPO_DIR" ]; then
+    echo "Existing directory $REPO_DIR found - removing for clean clone ..."
+    rm -rf "$REPO_DIR"
+  fi
+
+  # Neu klonen
+  echo "Cloning $REPO_URL (branch: $REPO_BRANCH) to $REPO_DIR ..."
+  mkdir -p "$REPO_DIR"
+  git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
+
+  cd "$REPO_DIR"
+  echo "Repository cloned successfully."
 }
 
 ensure_config() {
@@ -142,36 +255,10 @@ ensure_config() {
     return
   fi
 
-  echo "No local config found. Creating a template at $CONFIG_FILE ..."
-  mkdir -p "$(dirname "$CONFIG_FILE")"
-
-  cat > "$CONFIG_FILE" <<'EOF'
-# Homelab base configuration
-# Adjust these values before re-running bootstrap.sh
-
-# Public domain or local DNS name for your homelab
-HOMELAB_DOMAIN=homelab.example.com
-GITEA_URL=gitea.homelab.example.com
-
-# Initial Gitea admin account
-GITEA_ADMIN_USER=admin
-GITEA_ADMIN_PASSWORD=changeme
-GITEA_ADMIN_EMAIL=you@example.com
-
-# Basic K3s configuration
-# IMPORTANT:
-# - Use the IP address of this host (output of `ip addr`)
-# - Or leave K3S_ADVERTISE_ADDRESS empty to let k3s auto-detect
-K3S_NODE_ROLE=server
-K3S_ADVERTISE_ADDRESS=
-
-# Optional: pin a specific K3s version, e.g. "v1.30.4+k3s1"
-# K3S_VERSION=v1.30.4+k3s1
-EOF
-
-  echo
-  echo "A template config has been created."
-  echo "Please edit $CONFIG_FILE to match your environment and run this script again."
+  echo "No config found at $CONFIG_FILE"
+  echo "Please copy the template:"
+  echo "  cp $REPO_DIR/config.env.example $CONFIG_FILE"
+  echo "and edit it accordingly."
   exit 1
 }
 
@@ -324,6 +411,21 @@ ensure_install_script() {
   echo "install.sh is ready."
 }
 
+install_internal_ca() {
+  local CA_SRC="/root/internal_ca_chain.crt"   # <- hier legst du deine CA-Chain hin
+  local CA_DST="/usr/local/share/ca-certificates/internal-ca.crt"
+
+  if [ ! -f "$CA_SRC" ]; then
+    echo "WARN: internal CA $CA_SRC nicht gefunden, überspringe CA-Install."
+    return 0
+  fi
+
+  echo "== Installing internal CA =="
+  sudo mkdir -p /usr/local/share/ca-certificates
+  sudo cp "$CA_SRC" "$CA_DST"
+  sudo update-ca-certificates
+}
+
 run_install() {
   echo "== Step 9: Running install.sh (deploying apps to K3s) =="
   cd "$REPO_DIR"
@@ -333,20 +435,31 @@ run_install() {
 # ===== main =====
 
 main() {
-  echo "Homelab bootstrap – this will prepare the system, install K3s and then deploy Gitea/manifests."
-  echo
-  echo "Repository branch: $REPO_BRANCH"
-  echo
 
   need_root
   ensure_basic_tools
-  install_helm_if_missing
   clone_or_update_repo
+  
+  # Reset bekommt absolute Priorität: nur resetten, NICHT installieren
+  if [ -n "$RESET_MODE" ]; then
+    perform_reset
+  fi
+
+  echo "Homelab bootstrap - this will prepare the system, install K3s and then deploy manifests."
+  echo
+  echo "Repository branch: $REPO_BRANCH"
+  echo "Repository URL:    $REPO_URL"
+  echo "Repository dir:    $REPO_DIR"
+  echo "Config file:       $CONFIG_FILE"
+  echo
+
+  install_helm_if_missing
   ensure_config
   check_ports
   check_existing_k3s
   install_k3s_if_missing
   ensure_install_script
+  install_internal_ca
   run_install
 
   echo

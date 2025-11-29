@@ -9,11 +9,13 @@ service:
 
 ingress:
   enabled: true
-  className: ""
+  className: traefik
   host: gitea.homelab.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: step-ca-issuer
   tls:
-    enabled: false
-    secretName: ""
+    enabled: true
+    secretName: gitea-tls
 
 gitea:
   # aktuell nur als Platzhalter – kann später für einen Bootstrap-Job genutzt werden
